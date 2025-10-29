@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#000000" />
+
+    <!-- iOS add-to-home fullscreen -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <title>As Above • So Below - New Mythology</title>
+    <style>
+      :root {
+        --bg: #060915;
+        --fg: #d6d6d6;
+        --muted: #9aa4c7;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: radial-gradient(
+          1200px 800px at 70% 20%,
+          #0d1633 0%,
+          var(--bg) 60%
+        );
+      }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Helvetica, Arial;
+        color: var(--fg);
+      }
+      #c {
+        position: fixed;
+        inset: 0;
+        width: 100svw; /* dynamic viewport: mobile-safe */
+        height: 100svh;
+        display: block;
+        background: transparent;
+      }
+      #tooltip {
+        position: fixed;
+        pointer-events: none;
+        background: #0f1424ee;
+        border: 1px solid #22305b;
+        padding: 8px 10px;
+        border-radius: 10px;
+        font-size: 12px;
+        color: var(--fg);
+        backdrop-filter: blur(4px);
+        display: none;
+      }
+      #badge {
+        position: absolute;
+        left: 12px;
+        bottom: 12px;
+        font-size: 12px;
+        color: var(--fg);
+        background: transparent;
+        border: none;
+        padding: 0;
+        border-radius: 0;
+        display: none;
+      }
+      #corner {
+        position: absolute;
+        right: 12px;
+        bottom: 12px;
+        font-size: 12px;
+        color: var(--fg);
+      }
+      .gold {
+        color: #ffd36c;
+      }
+      #title-box {
+        position: fixed;
+        top: 20px;
+        left: 12px;
+        background: rgba(10, 15, 30, 0.3);
+        border: 1px solid rgba(116, 119, 78, 0.5);
+        border-radius: 12px;
+        padding: 10px 24px 16px 20px;
+        text-align: left;
+        box-shadow: 0 0 20px hsla(65, 43%, 63%, 0.103);
+        backdrop-filter: blur(6px);
+      }
+      #title-box .title {
+        position: static;
+        left: auto;
+        top: auto;
+        color: #ffffff;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+          Helvetica, Arial;
+        font-weight: 300;
+        letter-spacing: 0.03em;
+        opacity: 0.95;
+        font-size: 19px;
+        line-height: 1.4;
+        text-rendering: optimizeLegibility;
+      }
+      #title-box .subtitle {
+        position: static;
+        left: auto;
+        top: auto;
+        font-size: 12px;
+        color: var(--muted);
+        opacity: 0.9;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" aria-label="As Above So Below visualization"></canvas>
+    <div id="title-box">
+      <div class="title">As Above • So Below</div>
+      <div class="subtitle">new mythology</div>
+    </div>
+    <div id="tooltip"></div>
+    <div id="badge">October 2025</div>
+    <div id="corner"></div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        // Host embed guard
+        try {
+          if (!window.hostAPI) window.hostAPI = {};
+          if (typeof window.hostAPI.notifyIntrinsicHeight !== "function") {
+            window.hostAPI.notifyIntrinsicHeight = function noop() {};
+          }
+        } catch (_) {}
+
+        // ------- Constants -------
+        const SKY = {
+          count: 900,
+          sizeMin: 0.6,
+          sizeMax: 2.0,
+          twinkleMin: 0.25,
+          twinkleMax: 1.6,
+          floor: 0.1,
+        };
+        const NEBULA = { grains: 1800, drift: 0.00006 };
+        const METEORS = { rate: 5.2, speed: [380, 820], life: [0.35, 0.8] }; // short, fast
+        const BG_CIRCLES = {
+          count: 64,
+          spawnR: [1.2, 4],
+          drift: 6,
+          mergeChance: 0.02,
+          burstChance: 0.015,
+          mergeBoost: 6,
+        };
+        const WITHIN = {
+          sizeK: 0.00042,
+          floor: 0.1,
+          richFreq: 0.35,
+          poorFreq: 1.6,
+          rotate: 0.018,
+          ringK: 0.4,
+        };
+        const MIRROR = { radiusK: 0.52, glow: 0.06 };
+        const GOLD_RATIO = 3000 / 195;
+        const BILLIONAIRES_URL = null;
+        const BILLIONAIRE_COUNTS_URL = null;
+
+        // ------- Utilities -------
+        const fmt0 = new Intl.NumberFormat("en");
+        const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+        const lerp = (a, b, t) => a + (b - a) * t;
+        const norm = (v, lo, hi) => (v - lo) / (hi - lo || 1);
+        function mulberry32(seed) {
+          return function () {
+            let t = (seed += 0x6d2b79f5);
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+          };
+        }
+        const rand = mulberry32(0xc0ffee ^ (Date.now() & 0xffffffff));
+
+        // ------- Canvas / DOM -------
+        const canvas = document.getElementById("c");
+        const ctx = canvas.getContext("2d");
+        const tooltip = document.getElementById("tooltip");
+        const badge = document.getElementById("badge");
+        const corner = document.getElementById("corner");
+
+        let W = 0,
+          H = 0,
+          DPR = 1,
+          animId = null,
+          tStart = performance.now();
+
+        // Stability & performance guards
+        let FIREWORK_RATE = 2 / 60;
+        const MAX_FIREWORKS = 80;
+        const MAX_METEORS = 60;
+
+        function clearGlowCaches() {
+          try {
+            STAR_CACHE.clear();
+          } catch (_) {}
+        }
+        setInterval(clearGlowCaches, 60_000);
+
+        let lastNow = tStart;
+
+        // --- Star sprite cache (offscreen) ---
+        const STAR_CACHE = new Map();
+        function getStarSprite(r) {
+          const key = Math.max(
+            0.4,
+            Math.min(4, Math.round(r * 10) / 10)
+          ).toFixed(1);
+          if (STAR_CACHE.has(key)) return STAR_CACHE.get(key);
+          const R = r * 8;
+          const size = Math.ceil(R * 2 + 2);
+          const off = document.createElement("canvas");
+          off.width = off.height = size;
+          const octx = off.getContext("2d");
+          const cx = size / 2,
+            cy = size / 2;
+          const grad = octx.createRadialGradient(cx, cy, 0, cx, cy, R);
+          grad.addColorStop(0, "rgba(180,210,255,0.05)");
+          grad.addColorStop(1, "rgba(0,0,0,0)");
+          octx.fillStyle = grad;
+          octx.beginPath();
+          octx.arc(cx, cy, R, 0, Math.PI * 2);
+          octx.fill();
+          octx.fillStyle = "rgba(235,240,255,0.9)";
+          octx.beginPath();
+          octx.arc(cx, cy, r, 0, Math.PI * 2);
+          octx.fill();
+          STAR_CACHE.set(key, off);
+          return off;
+        }
+
+        // Data containers
+        let stars = [],
+          dust = [],
+          meteors = [],
+          fireworks = [],
+          orbs = [];
+        let nations = [],
+          twins = [],
+          goldStars = [];
+        let worldPop = 0,
+          totalBillionaires = 0,
+          fireworksSpawned = 0;
+
+        // ------- Layout & Sky -------
+        function resize() {
+          const rect = canvas.getBoundingClientRect();
+          const cssW = Math.round(rect.width || window.innerWidth || 1);
+          const cssH = Math.round(rect.height || window.innerHeight || 1);
+          const nextDPR = Math.min(2, window.devicePixelRatio || 1);
+          if (W === cssW && H === cssH && DPR === nextDPR) return;
+
+          DPR = nextDPR;
+          W = cssW;
+          H = cssH;
+
+          const bw = Math.max(1, Math.floor(W * DPR));
+          const bh = Math.max(1, Math.floor(H * DPR));
+          if (canvas.width !== bw || canvas.height !== bh) {
+            canvas.width = bw;
+            canvas.height = bh;
+          }
+          ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+        }
+
+        // Wait until the canvas has a non-zero size before seeding positions
+        function boot() {
+          resize();
+          if (W < 2 || H < 2) {
+            requestAnimationFrame(boot);
+            return;
+          }
+          seedNations();
+          layoutNations();
+          initSky();
+          (async () => {
+            await loadBillionaires();
+            await loadBillionaireCounts();
+            synthesizeGoldFromCounts();
+            syncGoldSizes();
+            buildTwins();
+            lastNow = performance.now();
+            animId = requestAnimationFrame(render);
+            badge.style.display = "block";
+            corner.innerHTML = `Countries: 195 • World population: 8,231,613,070 <span class="gold">• Billionaires: 3,028</span>`;
+          })();
+        }
+        boot();
+
+        function initSky() {
+          if (W < 2 || H < 2) return;
+          // starfield
+          stars = new Array(SKY.count).fill(0).map(() => {
+            const x = rand() * W,
+              y = rand() * H;
+            const r = lerp(SKY.sizeMin, SKY.sizeMax, rand() * rand());
+            const phase = rand() * Math.PI * 2;
+            const freq = lerp(SKY.twinkleMin, SKY.twinkleMax, rand());
+            return { x, y, r, phase, freq };
+          });
+          // nebula dust
+          dust = new Array(NEBULA.grains).fill(0).map(() => ({
+            x: rand() * W,
+            y: rand() * H,
+            a: 0.02 + 0.08 * rand(),
+            jx: (rand() - 0.5) * 0.2,
+            jy: (rand() - 0.5) * 0.2,
+          }));
+          // background orbs
+          orbs = [];
+          for (let i = 0; i < BG_CIRCLES.count; i++) orbs.push(spawnOrb());
+          // subtle re-jitter
+          for (const n of nations)
+            n.theta = (n.theta || 0) + (rand() - 0.5) * 0.2;
+        }
+
+        function spawnMeteor() {
+          if (W < 2 || H < 2) return;
+          const mode = rand() < 0.7 ? "edge" : "field";
+          let x, y, vx, vy;
+
+          if (mode === "edge") {
+            const side = Math.floor(rand() * 4);
+            const speed = lerp(METEORS.speed[0], METEORS.speed[1], rand());
+            const pad = 50;
+            if (side === 0) {
+              x = -pad;
+              y = rand() * H;
+            }
+            if (side === 1) {
+              x = W + pad;
+              y = rand() * H;
+            }
+            if (side === 2) {
+              x = rand() * W;
+              y = -pad;
+            }
+            if (side === 3) {
+              x = rand() * W;
+              y = H + pad;
+            }
+            const cx = W * 0.5,
+              cy = H * 0.5,
+              jitter = 0.6;
+            const ang = Math.atan2(cy - y, cx - x) + (rand() - 0.5) * jitter;
+            vx = Math.cos(ang) * speed;
+            vy = Math.sin(ang) * speed;
+          } else {
+            x = rand() * W;
+            y = rand() * H;
+            const speed = lerp(
+              METEORS.speed[0] * 0.7,
+              METEORS.speed[1] * 0.9,
+              rand()
+            );
+            const ang = rand() * Math.PI * 2;
+            vx = Math.cos(ang) * speed;
+            vy = Math.sin(ang) * speed;
+          }
+          const life = lerp(METEORS.life[0], METEORS.life[1], rand()) * 0.75;
+          meteors.push({ x, y, vx, vy, life, t0: performance.now() });
+          if (meteors.length > MAX_METEORS) meteors.shift();
+        }
+
+        function spawnOrb() {
+          const r = lerp(BG_CIRCLES.spawnR[0], BG_CIRCLES.spawnR[1], rand());
+          return {
+            x: rand() * W,
+            y: rand() * H,
+            r,
+            vx: (rand() - 0.5) * BG_CIRCLES.drift,
+            vy: (rand() - 0.5) * BG_CIRCLES.drift,
+            a: 0.25 + 0.35 * rand(),
+            hue: 210 + 20 * rand(),
+            burst: null,
+          };
+        }
+
+        function spawnFirework(x = rand() * W, y = rand() * H) {
+          if (W < 2 || H < 2) return;
+          const cx = W * 0.5,
+            cy = H * 0.5;
+          if (Math.hypot(x - cx, y - cy) < Math.min(W, H) * 0.14) {
+            x = rand() * W;
+            y = rand() * H;
+          }
+          const n = 10 + Math.floor(rand() * 10);
+          const parts = [];
+          for (let i = 0; i < n; i++) {
+            const ang = (i / n) * Math.PI * 2 + rand() * 0.25;
+            const sp = 40 + rand() * 60;
+            parts.push({
+              vx: Math.cos(ang) * sp,
+              vy: Math.sin(ang) * sp,
+              r: 0.8 + rand() * 0.8,
+            });
+          }
+          fireworks.push({
+            x,
+            y,
+            parts,
+            t0: performance.now(),
+            life: 1.1,
+            type: "spark",
+          });
+          fireworksSpawned++;
+          if (fireworks.length > MAX_FIREWORKS) fireworks.shift();
+        }
+
+        function spawnSupernova(x = rand() * W, y = rand() * H) {
+          if (W < 2 || H < 2) return;
+          const rays = 28 + Math.floor(rand() * 12);
+          const parts = [];
+          const base = 160 + rand() * 180;
+          for (let i = 0; i < rays; i++) {
+            const ang = (i / rays) * Math.PI * 2 + rand() * 0.08;
+            const sp = base * (0.8 + rand() * 0.7);
+            parts.push({
+              vx: Math.cos(ang) * sp,
+              vy: Math.sin(ang) * sp,
+              r: 1.2 + rand() * 0.8,
+            });
+          }
+          fireworks.push({
+            x,
+            y,
+            parts,
+            t0: performance.now(),
+            life: 0.9,
+            type: "nova",
+          });
+          if (fireworks.length > MAX_FIREWORKS) fireworks.shift();
+        }
+
+        // ------- Nations (WITHIN) -------
+        function layoutNations() {
+          if (W < 2 || H < 2) return;
+          if (!nations.length) return;
+          const R = Math.min(W, H) * WITHIN.ringK;
+          nations.sort((a, b) => (a.gdp_pc || 0) - (b.gdp_pc || 0));
+          const golden = Math.PI * (3 - Math.sqrt(5));
+          for (let i = 0; i < nations.length; i++) {
+            const n = nations[i];
+            const theta = i * golden;
+            n.theta = theta + (rand() - 0.5) * 0.06;
+            const q = clamp(
+              norm(Math.log(n.gdp_pc || 100), Math.log(100), Math.log(100000)),
+              0,
+              1
+            );
+            const base = 0.3 + 0.65 * q,
+              jitter = (rand() - 0.5) * 0.2;
+            n.radius = R * clamp(base + jitter, 0.12, 1.25);
+            n.freq = lerp(WITHIN.poorFreq, WITHIN.richFreq, q);
+            n.phase =
+              (((n.id.charCodeAt(0) * 17 +
+                n.id.charCodeAt(n.id.length - 1) * 13) %
+                1000) /
+                1000) *
+              Math.PI *
+              2;
+            const gpc = clamp(n.gdp_pc || 100, 100, 120000);
+            n.sizeR = clamp(
+              1.2 + 3.8 * norm(Math.log(gpc), Math.log(100), Math.log(120000)),
+              1.2,
+              10
+            );
+          }
+        }
+        function nationPos(n, t) {
+          const cx = W * 0.5,
+            cy = H * 0.5;
+          const a = n.theta + t * WITHIN.rotate;
+          return {
+            x: cx + n.radius * Math.cos(a),
+            y: cy + n.radius * Math.sin(a),
+            ang: a,
+          };
+        }
+
+        // ------- Twins -------
+        function buildTwins() {
+          if (W < 2 || H < 2) return;
+          twins = [];
+          if (!nations.length) return;
+          const cx = W * 0.5,
+            cy = H * 0.5;
+          for (const n of nations) {
+            const rx = 0.55 * W * (0.85 + 0.3 * rand());
+            const ry = 0.42 * H * (0.85 + 0.3 * rand());
+            twins.push({ ref: n, rx, ry, jitter: (rand() - 0.5) * 10, cx, cy });
+          }
+        }
+        function twinPos(tw, t) {
+          const n = tw.ref;
+          const a = n.theta - t * WITHIN.rotate * 0.6;
+          const ph = 0.25 * Math.sin(0.4 * t + n.phase);
+          const x =
+            tw.cx +
+            (tw.rx + tw.jitter * Math.sin(0.3 * t + n.phase)) *
+              Math.cos(a + ph);
+          const y =
+            tw.cy +
+            (tw.ry + tw.jitter * Math.cos(0.2 * t + n.phase)) *
+              Math.sin(a - ph);
+          return { x, y, ang: a };
+        }
+
+        // ------- Render Loop -------
+        function render() {
+          if (W < 2 || H < 2) {
+            animId = requestAnimationFrame(render);
+            return;
+          }
+
+          if (typeof window.__lastFrame === "undefined")
+            window.__lastFrame = performance.now();
+          const now = performance.now();
+          const dt = (now - lastNow) / 1000;
+          const frameMs = now - window.__lastFrame;
+          window.__lastFrame = now;
+          FIREWORK_RATE = frameMs > 22 ? 1 / 60 : 2 / 60;
+          const t = (now - tStart) / 1000;
+          ctx.clearRect(0, 0, W, H);
+
+          // Backdrop + nebula
+          ctx.fillStyle = "#060915";
+          ctx.fillRect(0, 0, W, H);
+          for (const d of dust) {
+            d.x += d.jx * NEBULA.drift * dt;
+            d.y += d.jy * NEBULA.drift * dt;
+            if (d.x < 0) d.x += W;
+            if (d.x > W) d.x -= W;
+            if (d.y < 0) d.y += H;
+            if (d.y > H) d.y -= H;
+            ctx.globalAlpha = d.a;
+            ctx.fillStyle = "#cfe3ff";
+            ctx.fillRect(d.x, d.y, 1, 1);
+          }
+          ctx.globalAlpha = 1;
+
+          // Starfield
+          for (const s of stars) {
+            const a0 = 0.5 + 0.5 * Math.sin(2 * Math.PI * s.freq * t + s.phase);
+            const alpha = clamp(SKY.floor + (1 - SKY.floor) * a0, SKY.floor, 1);
+            const sprite = getStarSprite(s.r);
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(
+              sprite,
+              s.x - sprite.width / 2,
+              s.y - sprite.height / 2
+            );
+          }
+          ctx.globalAlpha = 1;
+
+          // BG orbs: merge / burst
+          if (rand() < BG_CIRCLES.mergeChance) {
+            const i = Math.floor(rand() * orbs.length);
+            let bestJ = -1,
+              bestD = 1e9;
+            const oi = orbs[i];
+            for (let j = 0; j < orbs.length; j++) {
+              if (j === i) continue;
+              const oj = orbs[j];
+              const d = Math.hypot(oi.x - oj.x, oi.y - oj.y);
+              const thresh = (oi.r + oj.r) * 0.8 + BG_CIRCLES.mergeBoost;
+              if (d < thresh && d < bestD) {
+                bestD = d;
+                bestJ = j;
+              }
+            }
+            if (bestJ >= 0) {
+              const a1 = oi.r * oi.r,
+                a2 = orbs[bestJ].r * orbs[bestJ].r;
+              const a = a1 + a2;
+              const rNew = Math.sqrt(a);
+              const w1 = a1 / a,
+                w2 = a2 / a;
+              oi.x = oi.x * w1 + orbs[bestJ].x * w2;
+              oi.y = oi.y * w1 + orbs[bestJ].y * w2;
+              oi.r = clamp(rNew, 0.8, 14);
+              oi.vx = (oi.vx + orbs[bestJ].vx) * 0.5;
+              oi.vy = (oi.vy + orbs[bestJ].vy) * 0.5;
+              orbs.splice(bestJ, 1);
+              orbs.push(spawnOrb());
+            }
+          }
+          if (rand() < BG_CIRCLES.burstChance) {
+            const candidates = orbs.filter((o) => !o.burst);
+            if (candidates.length) {
+              const o = candidates[Math.floor(rand() * candidates.length)];
+              o.burst = { t0: now, life: 700 + rand() * 500 };
+              orbs.push(spawnOrb());
+            }
+          }
+          for (let k = orbs.length - 1; k >= 0; k--) {
+            const o = orbs[k];
+            o.x += o.vx * (1 / 60);
+            o.y += o.vy * (1 / 60);
+            if (o.x < -20) o.x = W + 20;
+            if (o.x > W + 20) o.x = -20;
+            if (o.y < -20) o.y = H + 20;
+            if (o.y > H + 20) o.y = -20;
+
+            if (o.burst) {
+              const prog = Math.min(1, (now - o.burst.t0) / o.burst.life);
+              const r = o.r * (1 + 2.2 * prog);
+              const a = o.a * (1 - prog);
+              const grad = ctx.createRadialGradient(
+                o.x,
+                o.y,
+                0,
+                o.x,
+                o.y,
+                r * 3
+              );
+              grad.addColorStop(0, `hsla(${o.hue},80%,70%,${0.1 * a})`);
+              grad.addColorStop(1, "rgba(0,0,0,0)");
+              ctx.fillStyle = grad;
+              ctx.beginPath();
+              ctx.arc(o.x, o.y, r * 3, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = `hsla(${o.hue},90%,85%,${0.65 * a})`;
+              ctx.beginPath();
+              ctx.arc(
+                o.x,
+                o.y,
+                Math.max(0.4, o.r * (1 - 0.7 * prog)),
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+              if (prog >= 1) {
+                orbs.splice(k, 1);
+              }
+            } else {
+              const grad = ctx.createRadialGradient(
+                o.x,
+                o.y,
+                0,
+                o.x,
+                o.y,
+                o.r * 6
+              );
+              grad.addColorStop(0, `hsla(${o.hue},70%,72%,${0.08 * o.a})`);
+              grad.addColorStop(1, "rgba(0,0,0,0)");
+              ctx.fillStyle = grad;
+              ctx.beginPath();
+              ctx.arc(o.x, o.y, o.r * 6, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = `hsla(${o.hue},90%,92%,${0.8 * o.a})`;
+              ctx.beginPath();
+              ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+
+          // Meteors
+          if (rand() < METEORS.rate / 60) spawnMeteor();
+          for (let i = meteors.length - 1; i >= 0; i--) {
+            const m = meteors[i];
+            const age = (now - m.t0) / 1000;
+            if (age > m.life) {
+              meteors.splice(i, 1);
+              continue;
+            }
+            m.x += m.vx * (1 / 60);
+            m.y += m.vy * (1 / 60);
+            const trail = 70;
+            const x2 = m.x - m.vx * (trail / 1000),
+              y2 = m.y - m.vy * (trail / 1000);
+            ctx.strokeStyle = "rgba(200,220,255,0.5)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(m.x, m.y);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+          }
+
+          // Fireworks / Novas
+          if (fireworks.length > MAX_FIREWORKS)
+            fireworks.splice(0, fireworks.length - MAX_FIREWORKS);
+          if (meteors.length > MAX_METEORS)
+            meteors.splice(0, meteors.length - MAX_METEORS);
+          if (rand() < FIREWORK_RATE) spawnFirework();
+          if (rand() < 0.08 / 60) spawnSupernova();
+          for (let i = fireworks.length - 1; i >= 0; i--) {
+            const f = fireworks[i];
+            const age = (now - f.t0) / 1000;
+            const k = age / f.life;
+            if (k >= 1) {
+              fireworks.splice(i, 1);
+              continue;
+            }
+            const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, 12);
+            g.addColorStop(0, "rgba(255,235,170,0.10)");
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(f.x, f.y, 12, 0, Math.PI * 2);
+            ctx.fill();
+            if (f.type === "spark") {
+              const fade = 1 - k;
+              for (const p of f.parts) {
+                const px = f.x + p.vx * age,
+                  py = f.y + p.vy * age + 20 * age * age * 0.4;
+                const pr = Math.max(0.4, p.r * (0.9 * fade));
+                const glow = ctx.createRadialGradient(
+                  px,
+                  py,
+                  0,
+                  px,
+                  py,
+                  pr * 5
+                );
+                glow.addColorStop(0, `rgba(255,215,100,${0.1 * fade})`);
+                glow.addColorStop(1, "rgba(0,0,0,0)");
+                ctx.fillStyle = glow;
+                ctx.beginPath();
+                ctx.arc(px, py, pr * 5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = `rgba(255,215,120,${0.85 * fade})`;
+                ctx.beginPath();
+                ctx.arc(px, py, pr, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            } else if (f.type === "nova") {
+              const fade = 1 - k;
+              const core = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, 40);
+              core.addColorStop(0, "rgba(255,230,160,0.12)");
+              core.addColorStop(1, "rgba(0,0,0,0)");
+              ctx.fillStyle = core;
+              ctx.beginPath();
+              ctx.arc(f.x, f.y, 40, 0, Math.PI * 2);
+              ctx.fill();
+              for (const p of f.parts) {
+                const px = f.x + p.vx * age,
+                  py = f.y + p.vy * age;
+                const pr = Math.max(0.5, p.r * fade);
+                const g2 = ctx.createRadialGradient(px, py, 0, px, py, pr * 6);
+                g2.addColorStop(0, `rgba(255,210,120,${0.1 * fade})`);
+                g2.addColorStop(1, "rgba(0,0,0,0)");
+                ctx.fillStyle = g2;
+                ctx.beginPath();
+                ctx.arc(px, py, pr * 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = `rgba(255,215,140,${0.8 * fade})`;
+                ctx.beginPath();
+                ctx.arc(px, py, pr, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+
+          // Nations (within)
+          for (const n of nations) {
+            const pos = nationPos(n, t);
+            const a0 = 0.5 + 0.5 * Math.sin(2 * Math.PI * n.freq * t + n.phase);
+            const alpha = clamp(
+              WITHIN.floor + (1 - WITHIN.floor) * a0,
+              WITHIN.floor,
+              1
+            );
+            const sizeR = n.sizeR;
+            const glow = ctx.createRadialGradient(
+              pos.x,
+              pos.y,
+              0,
+              pos.x,
+              pos.y,
+              sizeR * 6
+            );
+            glow.addColorStop(0, `rgba(160,200,255,${0.05 * alpha})`);
+            glow.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, sizeR * 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(230,236,255,${0.85 * alpha})`;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, sizeR, 0, Math.PI * 2);
+            ctx.fill();
+            const b = n.bcount || 0;
+            if (b > 0) {
+              const k = Math.min(1, Math.log(1 + b) / Math.log(1 + 200));
+              const gglow = ctx.createRadialGradient(
+                pos.x,
+                pos.y,
+                0,
+                pos.x,
+                pos.y,
+                sizeR * (4 + 8 * k)
+              );
+              gglow.addColorStop(0, `rgba(255,215,0,${0.1 * alpha * k})`);
+              gglow.addColorStop(1, "rgba(0,0,0,0)");
+              ctx.fillStyle = gglow;
+              ctx.beginPath();
+              ctx.arc(pos.x, pos.y, sizeR * (4 + 8 * k), 0, Math.PI * 2);
+              ctx.fill();
+            }
+            n._x = pos.x;
+            n._y = pos.y;
+            n._r = sizeR;
+          }
+
+          // Twins (above)
+          for (const tw of twins) {
+            const n = tw.ref;
+            const pos = twinPos(tw, t);
+            const a0 = 0.5 + 0.5 * Math.sin(2 * Math.PI * n.freq * t + n.phase);
+            const alpha = clamp(0.06 + 0.94 * a0, 0.06, 1);
+            const r = clamp((n._r || n.sizeR) * 0.85, 0.7, 6);
+            const glow = ctx.createRadialGradient(
+              pos.x,
+              pos.y,
+              0,
+              pos.x,
+              pos.y,
+              r * 8
+            );
+            glow.addColorStop(0, `rgba(180,210,255,${MIRROR.glow * alpha})`);
+            glow.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, r * 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(235,240,255,${0.75 * alpha})`;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(180,210,255,0.06)";
+            ctx.lineWidth = 0.6;
+            ctx.beginPath();
+            ctx.moveTo(n._x, n._y);
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+            tw._x = pos.x;
+            tw._y = pos.y;
+            tw._r = r;
+          }
+
+          // Billionaire gold stars
+          for (const g of goldStars) {
+            const a0 = 0.5 + 0.5 * Math.sin(2 * Math.PI * g.freq * t + g.phase);
+            const alpha = 0.5 + 0.5 * a0;
+            const glow = ctx.createRadialGradient(
+              g.x,
+              g.y,
+              0,
+              g.x,
+              g.y,
+              g.r * 6
+            );
+            glow.addColorStop(0, `rgba(255,215,0,${0.12 * alpha})`);
+            glow.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(g.x, g.y, g.r * 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(255,215,0,${0.9 * alpha})`;
+            ctx.beginPath();
+            ctx.arc(g.x, g.y, Math.max(0.6, g.r * 0.9), 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          // inequality shards
+          if (nations.length) {
+            const gdps = nations.map((n) => n.gdp_pc || 100);
+            const mean = gdps.reduce((a, b) => a + b, 0) / gdps.length;
+            const variance =
+              gdps.reduce((a, b) => a + (b - mean) * (b - mean), 0) /
+              gdps.length;
+            const k = Math.log(variance + 1);
+            const shards = Math.min(40, Math.floor(4 + k));
+            for (let i = 0; i < shards; i++) {
+              const ang = rand() * Math.PI * 2;
+              const r = Math.min(W, H) * 0.22 * rand();
+              const cx = W * 0.5,
+                cy = H * 0.5;
+              const x = cx + r * Math.cos(ang),
+                y = cy + r * Math.sin(ang);
+              ctx.strokeStyle = "rgba(255,120,120,0.07)";
+              ctx.lineWidth = rand() * 2 + 0.2;
+              ctx.beginPath();
+              ctx.moveTo(x, y);
+              ctx.lineTo(x + Math.cos(ang) * 60, y + Math.sin(ang) * 60);
+              ctx.stroke();
+            }
+          }
+
+          lastNow = now;
+          animId = requestAnimationFrame(render);
+        }
+
+        // ------- Hover -------
+        function hit(mx, my) {
+          for (let i = nations.length - 1; i >= 0; i--) {
+            const p = nations[i];
+            const dx = mx - p._x,
+              dy = my - p._y;
+            const rr = p._r + 4;
+            if (dx * dx + dy * dy <= rr * rr) return { type: "nation", ref: p };
+          }
+          for (let i = goldStars.length - 1; i >= 0; i--) {
+            const g = goldStars[i];
+            const dx = mx - g.x,
+              dy = my - g.y;
+            const rr = g.r + 6;
+            if (dx * dx + dy * dy <= rr * rr) return { type: "gold", ref: g };
+          }
+          return null;
+        }
+
+        canvas.addEventListener("mousemove", (e) => {
+          const rect = canvas.getBoundingClientRect();
+          const mx = e.clientX - rect.left,
+            my = e.clientY - rect.top;
+          const h = hit(mx, my);
+          if (h) {
+            tooltip.style.display = "block";
+            tooltip.style.left = e.clientX + 12 + "px";
+            tooltip.style.top = e.clientY + 12 + "px";
+            if (h.type === "nation") {
+              const n = h.ref;
+              tooltip.innerHTML = [
+                `<div style="font-weight:600; color:#e8ecff; margin-bottom:2px">${n.name}</div>`,
+                `<div>Population: ${fmt0.format(n.population)}</div>`,
+                `<div>GDP per capita: ${
+                  n.gdp_pc ? "$" + fmt0.format(n.gdp_pc) : "—"
+                }</div>`,
+                `<div style="margin-top:4px; color:#9aa4c7">Snapshot • October 2025</div>`,
+                `<div style="margin-top:2px; color:#ffd700">Billionaires (est.): ${
+                  n.bcount || 0
+                }</div>`,
+              ].join("");
+            } else if (h.type === "gold") {
+              const g = h.ref;
+              tooltip.innerHTML =
+                `<div style="font-weight:600; color:#ffd700; margin-bottom:2px">${g.name}</div>` +
+                `<div>Net worth: $${fmt0.format(
+                  Math.round((g.worth_usd || 0) / 1e6)
+                )}M</div>` +
+                `<div style="color:#9aa4c7">${g.country || ""}</div>`;
+            }
+          } else {
+            tooltip.style.display = "none";
+          }
+        });
+
+        // ------- Data bootstraps -------
+        function seedNations() {
+          const seed = [
+            ["CHN", "China", 1411778724, 12000],
+            ["IND", "India", 1428627663, 2500],
+            ["USA", "United States", 339996563, 65000],
+            ["IDN", "Indonesia", 277534122, 4300],
+            ["PAK", "Pakistan", 240485658, 1500],
+            ["NGA", "Nigeria", 223804632, 2400],
+            ["BRA", "Brazil", 216422446, 9000],
+            ["BGD", "Bangladesh", 172954319, 2500],
+            ["RUS", "Russia", 144444359, 13500],
+            ["MEX", "Mexico", 128455567, 10500],
+            ["ETH", "Ethiopia", 126527060, 1100],
+            ["JPN", "Japan", 123294513, 42000],
+            ["PHL", "Philippines", 117337368, 3800],
+            ["EGY", "Egypt", 112716598, 4100],
+            ["VNM", "Viet Nam", 98186856, 4300],
+            ["TUR", "Türkiye", 85341241, 10500],
+            ["IRN", "Iran", 89172767, 5500],
+            ["DEU", "Germany", 83294633, 51000],
+            ["FRA", "France", 68446000, 44000],
+            ["GBR", "United Kingdom", 67508936, 46000],
+            ["THA", "Thailand", 71600000, 7000],
+            ["ITA", "Italy", 58853482, 36000],
+            ["TZA", "Tanzania", 67400000, 1100],
+            ["ZAF", "South Africa", 60400000, 7000],
+            ["MMR", "Myanmar", 54600000, 1500],
+            ["KEN", "Kenya", 54600000, 2100],
+            ["KOR", "Korea, Rep.", 51700000, 33000],
+            ["COL", "Colombia", 51500000, 7200],
+            ["ESP", "Spain", 47400000, 30000],
+            ["UGA", "Uganda", 48500000, 900],
+            ["ARG", "Argentina", 45700000, 10500],
+            ["DZA", "Algeria", 44900000, 4200],
+            ["SDN", "Sudan", 48100000, 1500],
+            ["UKR", "Ukraine", 37900000, 4800],
+            ["IRQ", "Iraq", 45500000, 5000],
+            ["AFG", "Afghanistan", 41100000, 600],
+            ["POL", "Poland", 37700000, 18000],
+            ["CAN", "Canada", 38900000, 46000],
+            ["MAR", "Morocco", 37100000, 3800],
+            ["SAU", "Saudi Arabia", 36000000, 24000],
+            ["UZB", "Uzbekistan", 35200000, 2200],
+            ["PER", "Peru", 34100000, 6300],
+            ["MYS", "Malaysia", 33600000, 11000],
+            ["AGO", "Angola", 35500000, 2500],
+            ["GHA", "Ghana", 32700000, 2200],
+            ["MOZ", "Mozambique", 33000000, 600],
+            ["YEM", "Yemen", 33600000, 900],
+            ["NPL", "Nepal", 30200000, 1200],
+            ["AUS", "Australia", 26300000, 57000],
+            ["TWN", "Taiwan", 23800000, 33000],
+            ["MDG", "Madagascar", 28900000, 500],
+            ["CMR", "Cameroon", 27800000, 1600],
+            ["CIV", "Côte d’Ivoire", 28300000, 2500],
+            ["NLD", "Netherlands", 17900000, 52000],
+            ["ROU", "Romania", 19100000, 15000],
+            ["SOM", "Somalia", 17500000, 500],
+            ["BFA", "Burkina Faso", 22100000, 900],
+            ["NER", "Niger", 26200000, 600],
+            ["SEN", "Senegal", 17800000, 1600],
+            ["GTM", "Guatemala", 17400000, 5200],
+            ["PRK", "Korea, Dem. People’s Rep.", 26000000, 800],
+            ["ECU", "Ecuador", 17600000, 6500],
+            ["MLI", "Mali", 22000000, 900],
+            ["BOL", "Bolivia", 12000000, 3600],
+            ["MWI", "Malawi", 20000000, 600],
+            ["ZMB", "Zambia", 20000000, 1300],
+            ["SYR", "Syrian Arab Republic", 21000000, 1200],
+            ["TUN", "Tunisia", 12000000, 3900],
+            ["VEN", "Venezuela", 28000000, 1800],
+            ["PRI", "Puerto Rico", 3300000, 33000],
+            ["PRY", "Paraguay", 7000000, 6000],
+            ["LBN", "Lebanon", 5500000, 6000],
+            ["JOR", "Jordan", 11000000, 4600],
+            ["HUN", "Hungary", 9700000, 18000],
+            ["CZE", "Czechia", 10500000, 23000],
+            ["SWE", "Sweden", 10500000, 53000],
+            ["GRC", "Greece", 10300000, 20000],
+            ["AUT", "Austria", 9000000, 52000],
+            ["ISR", "Israel", 9800000, 52000],
+            ["CHE", "Switzerland", 8700000, 90000],
+            ["PRT", "Portugal", 10300000, 23000],
+            ["IRL", "Ireland", 5200000, 100000],
+            ["SGP", "Singapore", 5600000, 70000],
+            ["DNK", "Denmark", 5900000, 62000],
+            ["NOR", "Norway", 5400000, 90000],
+            ["FIN", "Finland", 5600000, 52000],
+            ["NZL", "New Zealand", 5200000, 46000],
+            ["ARE", "United Arab Emirates", 9800000, 43000],
+            ["QAT", "Qatar", 2900000, 60000],
+            ["KAZ", "Kazakhstan", 19000000, 10000],
+            ["SRB", "Serbia", 6700000, 9000],
+            ["HRV", "Croatia", 3900000, 18000],
+            ["SVK", "Slovak Republic", 5400000, 20000],
+            ["SVN", "Slovenia", 2100000, 27000],
+            ["BGR", "Bulgaria", 6800000, 12000],
+            ["BIH", "Bosnia and Herzegovina", 3300000, 7400],
+            ["ALB", "Albania", 2800000, 6500],
+            ["ARM", "Armenia", 2800000, 7000],
+            ["GEO", "Georgia", 3700000, 7000],
+            ["MNE", "Montenegro", 620000, 9000],
+            ["ISL", "Iceland", 380000, 70000],
+            ["LUX", "Luxembourg", 650000, 115000],
+            ["EST", "Estonia", 1300000, 24000],
+            ["LTU", "Lithuania", 2800000, 23000],
+            ["LVA", "Latvia", 1900000, 21000],
+            ["URY", "Uruguay", 3500000, 17000],
+            ["CHL", "Chile", 19000000, 14500],
+            ["PAN", "Panama", 4400000, 16000],
+            ["CRI", "Costa Rica", 5200000, 13000],
+            ["CUB", "Cuba", 11300000, 9000],
+          ];
+          nations = seed.map(([id, name, pop, gpc]) => ({
+            id,
+            name,
+            population: pop,
+            gdp_pc: gpc,
+          }));
+          worldPop = nations.reduce((s, c) => s + c.population, 0);
+          const bSeed = {
+            USA: 735,
+            CHN: 495,
+            IND: 169,
+            DEU: 134,
+            RUS: 110,
+            HKG: 70,
+            BRA: 60,
+            CAN: 60,
+            MEX: 50,
+            AUS: 50,
+            ITA: 55,
+            FRA: 50,
+            GBR: 150,
+            JPN: 50,
+            KOR: 45,
+            TUR: 30,
+            ESP: 25,
+            SWE: 40,
+            CHE: 40,
+            NLD: 35,
+            IDN: 25,
+            SGP: 30,
+            ARE: 25,
+            QAT: 15,
+            NOR: 15,
+            DNK: 15,
+            FIN: 10,
+            IRL: 20,
+            ISR: 20,
+            SAU: 25,
+            TWN: 45,
+            THA: 25,
+            MYS: 20,
+            VNM: 10,
+            EGY: 8,
+            NGA: 4,
+            ZAF: 5,
+            ARG: 5,
+            CHL: 6,
+            COL: 5,
+            POL: 5,
+            AUT: 8,
+            BEL: 7,
+            CZE: 7,
+            HUN: 5,
+            PRT: 3,
+            GRC: 4,
+            UKR: 8,
+            PAK: 5,
+            BGD: 2,
+            IRN: 2,
+            KAZ: 4,
+            NZL: 2,
+          };
+          totalBillionaires = 0;
+          nations.forEach((n) => {
+            n.bcount = bSeed[n.id] || 0;
+            totalBillionaires += n.bcount;
+          });
+        }
+
+        async function loadBillionaires() {
+          goldStars = [];
+          try {
+            if (BILLIONAIRES_URL) {
+              const data = await (await fetch(BILLIONAIRES_URL)).json();
+              goldStars = data.map((d) => ({
+                name: d.name,
+                worth_usd: +d.worth_usd || 1e9,
+                country: d.country || "",
+                x: rand() * W,
+                y: rand() * H,
+                r: 0.9,
+                phase: rand() * Math.PI * 2,
+                freq: 0.35 + 0.9 * rand(),
+              }));
+            }
+          } catch (e) {
+            console.warn("Failed to load external billionaires JSON", e);
+          }
+          if (!goldStars.length) {
+            const seed = [
+              ["Elon Musk", 210e9, "USA"],
+              ["Bernard Arnault", 200e9, "France"],
+              ["Jeff Bezos", 195e9, "USA"],
+              ["Larry Ellison", 170e9, "USA"],
+              ["Mark Zuckerberg", 165e9, "USA"],
+              ["Warren Buffett", 145e9, "USA"],
+              ["Bill Gates", 130e9, "USA"],
+              ["Larry Page", 130e9, "USA"],
+              ["Sergey Brin", 125e9, "USA"],
+              ["Mukesh Ambani", 110e9, "India"],
+            ];
+            goldStars = seed.map(([name, worth, country]) => ({
+              name,
+              country,
+              worth_usd: worth,
+              x: rand() * W,
+              y: rand() * H,
+              r: 0.9,
+              phase: rand() * Math.PI * 2,
+              freq: 0.35 + 0.9 * rand(),
+            }));
+          }
+        }
+
+        async function loadBillionaireCounts() {
+          let counts = null;
+          try {
+            if (BILLIONAIRE_COUNTS_URL)
+              counts = await (await fetch(BILLIONAIRE_COUNTS_URL)).json();
+          } catch (e) {
+            console.warn("Failed to load billionaire counts JSON", e);
+          }
+          if (!counts) {
+            counts = {
+              USA: 735,
+              CHN: 495,
+              IND: 169,
+              DEU: 134,
+              RUS: 110,
+              HKG: 70,
+              BRA: 60,
+              CAN: 60,
+              MEX: 50,
+              AUS: 50,
+              ITA: 55,
+              FRA: 50,
+              GBR: 150,
+              JPN: 50,
+              KOR: 45,
+              TUR: 30,
+              ESP: 25,
+              SWE: 40,
+              CHE: 40,
+              NLD: 35,
+              IDN: 25,
+              SGP: 30,
+              ARE: 25,
+              QAT: 15,
+              NOR: 15,
+              DNK: 15,
+              FIN: 10,
+              IRL: 20,
+              ISR: 20,
+              SAU: 25,
+              TWN: 45,
+              THA: 25,
+              MYS: 20,
+              VNM: 10,
+              EGY: 8,
+              NGA: 4,
+              ZAF: 5,
+              ARG: 5,
+              CHL: 6,
+              COL: 5,
+              POL: 5,
+              AUT: 8,
+              BEL: 7,
+              CZE: 7,
+              HUN: 5,
+              PRT: 3,
+              GRC: 4,
+              UKR: 8,
+              PAK: 5,
+              BGD: 2,
+              IRN: 2,
+              KAZ: 4,
+              NZL: 2,
+            };
+          }
+          totalBillionaires = 0;
+          nations.forEach((n) => {
+            n.bcount = counts[n.id] || n.bcount || 0;
+            totalBillionaires += n.bcount;
+          });
+        }
+
+        function targetGoldCount() {
+          return Math.max(80, Math.round(nations.length * GOLD_RATIO));
+        }
+
+        function synthesizeGoldFromCounts() {
+          if (W < 2 || H < 2) return;
+          const target = targetGoldCount();
+          let have = goldStars.length;
+          if (have >= target) {
+            goldStars = goldStars.slice(0, target);
+            return;
+          }
+          const sumCounts =
+            nations.reduce((s, n) => s + (n.bcount || 0), 0) || 1;
+          const scale = target / sumCounts;
+          for (const n of nations) {
+            const k = Math.max(0, Math.round((n.bcount || 0) * scale));
+            for (let i = 0; i < k; i++) {
+              goldStars.push({
+                name: `${n.name} — billionaire #${i + 1}`,
+                worth_usd: 1e9 * (1 + 4 * rand()),
+                country: n.name,
+                x: rand() * W,
+                y: rand() * H,
+                r: 0.8,
+                phase: rand() * Math.PI * 2,
+                freq: 0.35 + 0.9 * rand(),
+              });
+            }
+          }
+          if (goldStars.length > target) goldStars.length = target;
+        }
+
+        function syncGoldSizes() {
+          if (!goldStars.length || !nations.length) return;
+          for (const n of nations) {
+            if (!n.sizeR) {
+              const gpc = clamp(n.gdp_pc || 100, 100, 120000);
+              n.sizeR = clamp(
+                1.2 +
+                  3.8 * norm(Math.log(gpc), Math.log(100), Math.log(120000)),
+                1.2,
+                10
+              );
+            }
+          }
+          const countriesByWealth = [...nations].sort(
+            (a, b) => (b.gdp_pc || 0) - (a.gdp_pc || 0)
+          );
+          const sizes = countriesByWealth.map((n) => n.sizeR || 2);
+          const gs = [...goldStars]
+            .map((g, i) => ({ g, i, w: g.worth_usd || 0 }))
+            .sort((a, b) => b.w - a.w || a.i - b.i);
+          const L = Math.min(gs.length, sizes.length);
+          for (let i = 0; i < L; i++) gs[i].g.r = sizes[i];
+        }
+
+        console.debug("[AASB v6] booting…");
+
+        window.addEventListener("resize", () => {
+          clearGlowCaches();
+          resize();
+          if (W < 2 || H < 2) return; // guard against transient zero-size
+          layoutNations();
+          initSky();
+          synthesizeGoldFromCounts();
+          syncGoldSizes();
+          buildTwins();
+        });
+
+        window.addEventListener("keydown", (e) => {
+          if (e.key && e.key.toUpperCase() === "F") spawnFirework();
+        });
+
+        // quick tests (Shift+T)
+        function runTests() {
+          const results = [];
+          const R = Math.min(W, H) * WITHIN.ringK;
+          const radiiOk =
+            nations.length > 0 &&
+            nations.every(
+              (n) =>
+                Number.isFinite(n.radius) &&
+                n.radius >= R * 0.12 - 1e-6 &&
+                n.radius <= R * 1.25 + 1e-6
+            );
+          const twinsOk = twins.length === nations.length;
+          const noNaN = nations.every(
+            (n) =>
+              Number.isFinite(n.radius) &&
+              Number.isFinite(n._r || n.sizeR || 1) &&
+              Number.isFinite(n.freq) &&
+              Number.isFinite(n.theta)
+          );
+          const starsOk =
+            Array.isArray(stars) && stars.length >= Math.floor(SKY.count * 0.8);
+          const orbsOk =
+            Array.isArray(orbs) && orbs.length === BG_CIRCLES.count;
+          const hasBcounts = nations.some((n) => typeof n.bcount === "number");
+          const goldOk = Array.isArray(goldStars) && goldStars.length > 0;
+          const goldTargetOk = goldStars.length === targetGoldCount();
+          const twinFinite = twins.length
+            ? Number.isFinite(twinPos(twins[0], 0).x) &&
+              Number.isFinite(twinPos(twins[0], 0).y)
+            : true;
+          const meteorsRateHigh = METEORS.rate >= 1;
+          results.push(["radii dispersed (wider band)", radiiOk]);
+          results.push(["twins count matches nations", twinsOk]);
+          results.push(["nation params finite", noNaN]);
+          results.push(["starfield size ok", starsOk]);
+          results.push(["orbs count constant", orbsOk]);
+          results.push(["billionaire counts present", hasBcounts]);
+          results.push(["gold stars seeded", goldOk]);
+          results.push(["gold count meets target", goldTargetOk]);
+          results.push(["twinPos finite", twinFinite]);
+          results.push(["meteors rate >= 1/s", meteorsRateHigh]);
+          const mBefore = meteors.length;
+          spawnMeteor();
+          const mObj = meteors[meteors.length - 1];
+          const mSpeed = Math.hypot(mObj.vx, mObj.vy);
+          const mLifeOk = mObj.life <= 1.0;
+          const mSpeedOk = mSpeed >= 360;
+          meteors.splice(meteors.length - 1, 1);
+          results.push(["meteor life <= 1.0s", mLifeOk]);
+          results.push(["meteor speed >= 360px/s", mSpeedOk]);
+          spawnSupernova(0, 0);
+          const nova = fireworks.find((f) => f.type === "nova");
+          let novaLifeFast = true,
+            novaSpeedHigh = true;
+          if (nova) {
+            novaLifeFast = nova.life <= 1.0;
+            const avgSp =
+              nova.parts.reduce((s, p) => s + Math.hypot(p.vx, p.vy), 0) /
+              Math.max(1, nova.parts.length);
+            novaSpeedHigh = avgSp > 140;
+            const idx = fireworks.indexOf(nova);
+            if (idx >= 0) fireworks.splice(idx, 1);
+          }
+          for (const [name, ok] of results)
+            console[ok ? "log" : "warn"](`${ok ? "✔" : "✖"} ${name}`);
+        }
+        window.addEventListener("keydown", (e) => {
+          if (e.key === "T" && e.shiftKey) runTests();
+        });
+
+        // PWA: register service worker
+        if ("serviceWorker" in navigator) {
+          window.addEventListener("load", () => {
+            navigator.serviceWorker.register("/sw.js").catch(() => {});
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>
