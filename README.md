@@ -15,9 +15,9 @@ in 2025, roughly **3.4%** of total household wealth is concentrated among the wo
 - **Watch** as wealth dynamics unfold through celestial metaphors:
   - **Shooting stars** mark the rise and fall of fortunes.  
   - **Explosions** and fading halos visualize volatility.  
-  - **Drifting orbs** merge and burst, maintaining a delicate cosmic balance.  
-
-Each frame forms a living **data-driven artwork** — both image and dataset — continuously generated in real time.
+  - **Drifting orbs** merge and burst, maintaining a delicate cosmic balance.
+  - **Faint, shifting threads** connect every element — subtle lines of influence and interdependence —
+showing that even in vast distances, everything remains entangled in invisible motion.
 
 ---
 
